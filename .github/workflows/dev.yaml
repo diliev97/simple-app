@@ -42,7 +42,8 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix=
-            type=raw,value=dev,enable={{is_default_branch}}
+            type=raw,value=dev
+            type=raw,value={{sha}}-dev
             type=semver,pattern={{version}},from={{major}}.{{minor}}.{{patch}}
             type=semver,pattern={{major}}.{{minor}},from={{major}}.{{minor}}
 
