@@ -110,7 +110,7 @@ jobs:
             exit 0
           fi
 
-          if [[ "$STATE" == "CLOSED" && "$MERGED_AT" == "null" ]]; then
+          if [[ "$STATE" == "CLOSED" ]]; then
             echo "PR closed without merge."
             exit 1
           fi
