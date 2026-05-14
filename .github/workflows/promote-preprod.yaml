@@ -142,7 +142,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Retag release image
-        if: needs.validate.outputs.branch_type == 'release'
+        if: startsWith(github.event.inputs.source_branch, 'release/')        
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
           echo "Retagging release image for $VERSION"
