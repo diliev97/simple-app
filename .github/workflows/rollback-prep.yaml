@@ -59,7 +59,7 @@ jobs:
 
           git reset --hard $MERGE_COMMIT 
 
-          git push origin preprod
+          git push --force-with-lease origin preprod
 
   republish-image:
     runs-on: ubuntu-latest
