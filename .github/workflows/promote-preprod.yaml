@@ -69,7 +69,7 @@ jobs:
           PR_URL=$(gh pr create \
             --base "$BASE" \
             --head "$BRANCH" \
-            --title "Promoted: $BRANCH to preprod" \
+            --title "Promote: $BRANCH to preprod" \
             --body "Promotion to preprod environment" \
             --repo "${{ github.repository }}")
 
@@ -82,6 +82,7 @@ jobs:
     needs: create-pr
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v4
     - name: Wait until PR is merged
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
