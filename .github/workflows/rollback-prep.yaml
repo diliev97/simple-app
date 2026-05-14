@@ -62,7 +62,6 @@ jobs:
           git push origin preprod
 
   republish-image:
-    needs: wait-for-merge
     runs-on: ubuntu-latest
 
     steps:
