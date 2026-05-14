@@ -1,0 +1,88 @@
+name: Rollback Preparation
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: 'Target release date (e.g., 2026-05-21)'
+        required: true
+        type: string
+
+jobs:
+  create-rollback-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: preprod
+          fetch-branch: true
+
+      - name: Configure git
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+
+      - name: Find and prepare rollback
+        id: revert
+        run: |
+          TARGET_DATE=${{ github.event.inputs.target_date }}
+          echo "Looking for target date: $TARGET_DATE"
+
+          # Find the merge commit
+          FOUND_COMMIT=""
+          for commit in $(git log --oneline -30 --format="%H %s"); do
+            COMMIT_HASH=$(echo "$commit" | cut -d' ' -f1)
+            COMMIT_MSG=$(echo "$commit" | cut -d' ' -f2-)
+            if echo "$COMMIT_MSG" | grep -qi "Merge" && echo "$COMMIT_MSG" | grep -qiE "(release|hotfix)/$TARGET_DATE"; then
+              FOUND_COMMIT=$COMMIT_HASH
+              echo "Found merge commit: $FOUND_COMMIT"
+              break
+            fi
+          done
+
+          if [ -z "$FOUND_COMMIT" ]; then
+            echo "Could not find merge commit for release/hotfix $TARGET_DATE"
+            echo "Available merge commits:"
+            git log --oneline -20 --merges
+            exit 1
+          fi
+
+          # Get the first parent (preprod before the merge)
+          FIRST_PARENT=$(git rev-list --parents -n 1 $FOUND_COMMIT | cut -d' ' -f2)
+          echo "First parent commit: $FIRST_PARENT"
+
+          # Reset to first parent (state before merge)
+          git reset --soft $FIRST_PARENT
+
+          # Create a new branch for the rollback
+          BRANCH_NAME="rollback-to/$TARGET_DATE"
+          git checkout -b $BRANCH_NAME
+
+          # Commit the rollback
+          git commit -m "Rollback: Revert to state before $TARGET_DATE merge"
+
+          # Push the branch
+          git push origin $BRANCH_NAME --force
+
+          echo "date=$TARGET_DATE" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+      - name: Create PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Rollback preprod to ${{ steps.revert.outputs.date }}`,
+              body: `Rollback preprod to the state before merging release/${{ steps.revert.outputs.date }}. Merge this PR to complete the rollback.`,
+              head: '${{ steps.revert.outputs.branch }}',
+              base: 'preprod'
+            })
+            console.log('Created PR:', pr.html_url)
