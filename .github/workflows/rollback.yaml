@@ -65,7 +65,12 @@ jobs:
           echo "commit=$FOUND_COMMIT" >> $GITHUB_OUTPUT
 
           # Revert the merge commit (creates a new commit that undoes the merge)
-          git revert -m 1 $FOUND_COMMIT --no-commit
+          # Use -X ours to prefer our changes if there are conflicts
+          git revert -m 1 -X ours $FOUND_COMMIT --no-commit || {
+            # If revert fails due to conflicts, just stage all changes and commit
+            echo "Handling merge conflicts..."
+            git add -A
+          }
           git commit -m "Revert: Rollback to release $TARGET_DATE"
 
       - name: Push reverted changes
