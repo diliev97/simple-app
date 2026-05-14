@@ -36,6 +36,9 @@ jobs:
         id: revert
         run: |
           TARGET_DATE=${{ github.event.inputs.target_date }}
+          # Escape dots for regex
+          ESCAPED_DATE=$(echo "$TARGET_DATE" | sed 's/\./\\./g')
+          echo "Looking for target date: $TARGET_DATE (escaped: $ESCAPED_DATE)"
 
           # Find merge commits by checking each commit for multiple parents
           FOUND_COMMIT=""
@@ -44,8 +47,9 @@ jobs:
             if [ "$PARENT_COUNT" -ge 2 ]; then
               MSG=$(git log -1 --format=%B $commit)
               # Match both "release/21.05.2026" and "from user/release/21.05.2026"
-              if echo "$MSG" | grep -qE "(release|hotfix)/$TARGET_DATE|from.*(release|hotfix)/$TARGET_DATE"; then
+              if echo "$MSG" | grep -qE "(release|hotfix)/$ESCAPED_DATE|from.*(release|hotfix)/$ESCAPED_DATE"; then
                 FOUND_COMMIT=$commit
+                echo "Found merge commit: $FOUND_COMMIT"
                 break
               fi
             fi
