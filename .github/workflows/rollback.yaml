@@ -40,12 +40,16 @@ jobs:
 
           # Find merge commits by checking each commit for multiple parents
           FOUND_COMMIT=""
-          for commit in $(git log --oneline -20 --format=%H); do
+          for commit in $(git log --oneline -30 --format=%H); do
             PARENT_COUNT=$(git rev-list --parents -n 1 $commit | wc -l)
             if [ "$PARENT_COUNT" -ge 2 ]; then
               MSG=$(git log -1 --format=%B $commit)
-              # Match both "release/2026-05-21" and "from user/release/2026-05-21"
-              if echo "$MSG" | grep -qE "(release|hotfix)/$TARGET_DATE|from.*(release|hotfix)/$TARGET_DATE"; then
+              echo "Checking commit $commit: $MSG"
+              # Match multiple patterns:
+              # - "release/2026-05-14"
+              # - "from user/release/2026-05-14"
+              # - "Merge release/2026-05-14 into preprod"
+              if echo "$MSG" | grep -qiE "(release|hotfix)/$TARGET_DATE"; then
                 FOUND_COMMIT=$commit
                 echo "Found merge commit: $FOUND_COMMIT"
                 break
