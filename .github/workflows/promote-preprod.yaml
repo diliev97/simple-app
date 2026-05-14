@@ -7,9 +7,15 @@ on:
         description: "release/YYYY-MM-DD or hotfix/YYYY-MM-DD"
         required: true
 
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  TARGET_BRANCH: preprod
 
 jobs:
   validate:
@@ -20,63 +26,100 @@ jobs:
           fetch-depth: 0
 
       - name: Prevent older release promotion
+        if: steps.detect.outputs.branch_type == 'release'
         run: |
-          git fetch origin preprod
+          git fetch origin $TARGET_BRANCH
 
-          LAST=$(git log origin/preprod --grep="Promoted:" -1 --pretty=format:"%s")
-          echo "Last promotion: $LAST"
+          LAST_PROMOTION=$(git log origin/$TARGET_BRANCH \
+            --grep="Promoted:" \
+            -1 \
+            --pretty=format:"%s" || true)
 
-          if [[ "${{ github.event.inputs.source_branch }}" == release/* ]]; then
-            NEW_DATE=$(echo "${{ github.event.inputs.source_branch }}" | cut -d'/' -f2)
-            LAST_DATE=$(echo "$LAST" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}')
-
-            if [[ "$LAST_DATE" > "$NEW_DATE" ]]; then
-              echo "ERROR: Newer release already promoted"
-              exit 1
-            fi
+          if [ -z "$LAST_PROMOTION" ]; then
+            echo "No previous promotion found. Allowing first promotion."
+            exit 0
           fi
+
+          echo "Last promotion: $LAST_PROMOTION"
+
+          LAST_DATE=$(echo "$LAST_PROMOTION" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+          NEW_DATE="${{ steps.detect.outputs.version }}"
+
+          if [ -n "$LAST_DATE" ] && [[ "$LAST_DATE" > "$NEW_DATE" ]]; then
+            echo "ERROR: A newer release ($LAST_DATE) is already promoted."
+            exit 1
+          fi
+
+          echo "Promotion order validation passed."
   create-pr:
     needs: validate
     runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.create_pr.outputs.pr_number }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create PR
+      - name: Create PR to preprod
+        id: create_pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr create \
-            --base preprod \
-            --head "${{ github.event.inputs.source_branch }}" \
-            --title "Promoted: ${{ github.event.inputs.source_branch }}" \
-            --body "Promotion to preprod"
+          BRANCH="${{ github.event.inputs.source_branch }}"
+          BASE="${{ env.TARGET_BRANCH }}"
+
+          echo "Creating PR from '$BRANCH' to '$BASE'"
+
+          PR_URL=$(gh pr create \
+            --base "$BASE" \
+            --head "$BRANCH" \
+            --title "Promote: $BRANCH to preprod" \
+            --body "Promotion to preprod environment" \
+            --repo "${{ github.repository }}")
+
+          echo "PR created: $PR_URL"
+
+          PR_NUMBER=$(echo "$PR_URL" | awk -F'/' '{print $NF}')
+
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
   wait-for-merge:
     needs: create-pr
     runs-on: ubuntu-latest
     steps:
-      - name: Wait until PR merged
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          while true; do
-            STATE=$(gh pr list \
-              --head "${{ github.event.inputs.source_branch }}" \
-              --base preprod \
-              --json state \
-              -q '.[0].state')
+    - uses: actions/checkout@v4
+    - name: Wait until PR is merged
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        PR_NUMBER="${{ needs.create-pr.outputs.pr_number }}"
 
-            if [[ "$STATE" == "MERGED" ]]; then
-              echo "PR merged"
-              break
-            fi
+        echo "PR number is: $PR_NUMBER"
 
-            if [[ "$STATE" == "CLOSED" ]]; then
-              echo "PR closed without merge"
-              exit 1
-            fi
+        if [ -z "$PR_NUMBER" ]; then
+          echo "PR number is empty!"
+          exit 1
+        fi
 
-            sleep 15
-          done
+        for i in {1..180}; do
+          STATE=$(gh pr view "$PR_NUMBER" --json state -q '.state')
+          MERGED_AT=$(gh pr view "$PR_NUMBER" --json mergedAt -q '.mergedAt')
+
+          echo "State: $STATE | mergedAt: $MERGED_AT"
+
+          if [[ "$STATE" == "MERGED" ]]; then
+            echo "PR merged successfully."
+            exit 0
+          fi
+
+          if [[ "$STATE" == "CLOSED" ]]; then
+            echo "PR closed without merge."
+            exit 1
+          fi
+
+          sleep 20
+        done
+
+        echo "Timeout waiting for PR merge."
+        exit 1
   promote:
     name: Promote Image to Preprod
     needs: [validate, wait-for-merge]
@@ -97,9 +140,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Retag release image
-        if: needs.validate.outputs.branch_type == 'release'
+        if: startsWith(github.event.inputs.source_branch, 'release/')        
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
+          VERSION="${{ github.event.inputs.source_branch }}"
+          VERSION="${VERSION#release/}"
           echo "Retagging release image for $VERSION"
 
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-release
