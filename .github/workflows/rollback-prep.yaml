@@ -9,62 +9,133 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
   packages: write
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: diliev97/simple-app
+  TARGET_BRANCH: preprod
 
 jobs:
 
-  rollback:
-    name: Rollback via Image Re-Push Only
+  create-rollback-pr:
     runs-on: ubuntu-latest
 
+    outputs:
+      pr_number: ${{ steps.create_pr.outputs.pr_number }}
+
     steps:
-      - name: Validate input
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create rollback branch
         run: |
           VERSION="${{ github.event.inputs.release_version }}"
 
-          echo "Requested rollback version: $VERSION"
+          git fetch origin $TARGET_BRANCH
+          git checkout -b rollback-to-$VERSION origin/$TARGET_BRANCH
 
-          if ! echo "$VERSION" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
-            echo "Invalid version format. Expected YYYY-MM-DD"
+          echo "Creating rollback branch rollback-to-$VERSION"
+
+      - name: Find merge commit to revert
+        id: revert
+        run: |
+          VERSION="${{ github.event.inputs.release_version }}"
+
+          MERGE_COMMIT=$(git log origin/$TARGET_BRANCH \
+            --merges \
+            --grep="$VERSION" \
+            -1 \
+            --pretty=format:"%H")
+
+          if [ -z "$MERGE_COMMIT" ]; then
+            echo "No merge commit found for $VERSION"
             exit 1
           fi
 
-      - name: Login to GHCR
+          echo "Found merge commit: $MERGE_COMMIT"
+
+          git revert -m 1 $MERGE_COMMIT --no-edit --strategy=recursive -X theirs
+
+          git push origin rollback-to-$VERSION
+
+      - name: Create PR to preprod
+        id: create_pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.release_version }}"
+
+          PR_NUMBER=$(gh pr create \
+            --base preprod \
+            --head rollback-to-$VERSION \
+            --title "Rollback preprod to $VERSION" \
+            --body "Automated rollback" \
+            --json number \
+            --jq '.number')
+
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+          echo "Created PR #$PR_NUMBER"
+
+
+  wait-for-merge:
+    needs: create-rollback-pr
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Wait for PR merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ needs.create-rollback-pr.outputs.pr_number }}"
+
+          echo "Waiting for rollback PR #$PR_NUMBER"
+
+          for i in {1..180}; do
+            STATE=$(gh pr view "$PR_NUMBER" --json state -q '.state')
+            MERGED_AT=$(gh pr view "$PR_NUMBER" --json mergedAt -q '.mergedAt')
+
+            echo "State: $STATE | mergedAt: $MERGED_AT"
+
+            if [[ "$STATE" == "MERGED" ]]; then
+              echo "Rollback PR merged"
+              exit 0
+            fi
+
+            if [[ "$STATE" == "CLOSED" && "$MERGED_AT" == "null" ]]; then
+              echo "Rollback aborted"
+              exit 1
+            fi
+
+            sleep 20
+          done
+
+          echo "Timeout waiting for rollback PR"
+          exit 1
+
+
+  republish-image:
+    needs: wait-for-merge
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Login to registry
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY \
             -u ${{ github.actor }} \
             --password-stdin
 
-      - name: Verify image exists
-        run: |
-          VERSION="${{ github.event.inputs.release_version }}"
-          TAG="$VERSION-preprod"
-
-          echo "Checking image exists: $TAG"
-
-          docker manifest inspect $REGISTRY/$IMAGE_NAME:$TAG > /dev/null || {
-            echo "Image $TAG does not exist in registry"
-            exit 1
-          }
-
-          echo "Image exists: $TAG"
-
-      - name: Rollback (re-push existing image)
+      - name: Re-push existing preprod image (no retag)
         run: |
           VERSION="${{ github.event.inputs.release_version }}"
           TAG="$VERSION-preprod"
 
           echo "Rolling back using image: $TAG"
 
-          # Pull existing image
           docker pull $REGISTRY/$IMAGE_NAME:$TAG
-
-          # Re-push same image (this updates timestamp in registry)
           docker push $REGISTRY/$IMAGE_NAME:$TAG
 
-          echo "Rollback completed successfully"
-          echo "Argo CD will now detect updated image"
+          echo "Rollback completed"
