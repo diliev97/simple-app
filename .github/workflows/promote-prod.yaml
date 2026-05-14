@@ -1,0 +1,84 @@
+name: Promote Preprod to Prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Release date (YYYY-MM-DD)"
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: diliev97/simple-app
+
+jobs:
+
+  tag-and-promote:
+    name: Create Git Tag + Promote Image to Prod
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout preprod branch
+        uses: actions/checkout@v4
+        with:
+          ref: preprod
+          fetch-depth: 0
+
+      - name: Validate input
+        run: |
+          DATE="${{ github.event.inputs.date }}"
+
+          if ! echo "$DATE" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+            echo "Invalid date format. Expected YYYY-MM-DD"
+            exit 1
+          fi
+
+          echo "v$DATE" > tag.txt
+          echo "TAG=v$DATE" >> $GITHUB_ENV
+
+      - name: Create Git tag from preprod
+        run: |
+          echo "Creating git tag $TAG from preprod"
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git tag -a "$TAG" -m "Production release $TAG"
+          git push origin "$TAG"
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY \
+            -u ${{ github.actor }} \
+            --password-stdin
+
+      - name: Find latest preprod image
+        run: |
+          DATE="${{ github.event.inputs.date }}"
+          echo "Looking for image: $DATE-preprod"
+
+      - name: Pull preprod image
+        run: |
+          DATE="${{ github.event.inputs.date }}"
+
+          docker pull $REGISTRY/$IMAGE_NAME:$DATE-preprod
+
+      - name: Tag image as prod
+        run: |
+          DATE="${{ github.event.inputs.date }}"
+
+          docker tag \
+            $REGISTRY/$IMAGE_NAME:$DATE-preprod \
+            $REGISTRY/$IMAGE_NAME:$DATE-prod
+
+      - name: Push prod image
+        run: |
+          DATE="${{ github.event.inputs.date }}"
+
+          docker push $REGISTRY/$IMAGE_NAME:$DATE-prod
+
+          echo "Promoted to production: $DATE-prod"
