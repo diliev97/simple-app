@@ -19,9 +19,6 @@ env:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    outputs:
-      branch_type: ${{ steps.detect.outputs.branch_type }}
-      version: ${{ steps.detect.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,7 +141,8 @@ jobs:
       - name: Retag release image
         if: startsWith(github.event.inputs.source_branch, 'release/')        
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
+          VERSION="${{ github.event.inputs.source_branch }}"
+          VERSION="${VERSION#release/}"
           echo "Retagging release image for $VERSION"
 
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-release
