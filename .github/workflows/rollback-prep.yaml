@@ -35,6 +35,7 @@ jobs:
           VERSION="${{ github.event.inputs.release_version }}"
 
           git fetch origin $TARGET_BRANCH
+          git checkout $TARGET_BRANCH
         #  git checkout -b rollback-to-$VERSION origin/$TARGET_BRANCH
 
         #  echo "Creating rollback branch rollback-to-$VERSION"
