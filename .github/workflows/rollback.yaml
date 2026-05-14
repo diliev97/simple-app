@@ -38,29 +38,24 @@ jobs:
           TARGET_DATE=${{ github.event.inputs.target_date }}
           echo "Looking for target date: $TARGET_DATE"
 
-          # Find merge commits by checking each commit for multiple parents
-          FOUND_COMMIT=""
-          for commit in $(git log --oneline -30 --format=%H); do
-            PARENT_COUNT=$(git rev-list --parents -n 1 $commit | wc -l)
-            if [ "$PARENT_COUNT" -ge 2 ]; then
-              MSG=$(git log -1 --format=%B $commit)
-              echo "Checking commit $commit: $MSG"
-              # Match multiple patterns:
-              # - "release/2026-05-14"
-              # - "from user/release/2026-05-14"
-              # - "Merge release/2026-05-14 into preprod"
-              if echo "$MSG" | grep -qiE "(release|hotfix)/$TARGET_DATE"; then
-                FOUND_COMMIT=$commit
-                echo "Found merge commit: $FOUND_COMMIT"
+          # Find the merge commit by searching for the pattern in commit messages
+          FOUND_COMMIT=$(git log --oneline --all --format=%H --grep="$TARGET_DATE" | head -1)
+
+          if [ -z "$FOUND_COMMIT" ]; then
+            # Try a different approach - look for commits with the date in message body
+            FOUND_COMMIT=$(git log --oneline -30 --format=%H | while read commit; do
+              MSG=$(git log -1 --format=%B "$commit")
+              if echo "$MSG" | grep -qiE "release/$TARGET_DATE|hotfix/$TARGET_DATE"; then
+                echo "$commit"
                 break
               fi
-            fi
-          done
+            done)
+          fi
 
           if [ -z "$FOUND_COMMIT" ]; then
             echo "Could not find merge commit for release/hotfix $TARGET_DATE"
-            echo "Checking last 20 commits..."
-            git log --oneline -20
+            echo "All merge commits in last 20:"
+            git log --oneline -20 --merges
             exit 1
           fi
 
