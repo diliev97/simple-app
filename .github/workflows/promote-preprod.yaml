@@ -56,42 +56,56 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create PR
+        id: create_pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr create \
-            --base preprod \
-            --head "${{ github.event.inputs.source_branch }}" \
-            --title "Promoted: ${{ github.event.inputs.source_branch }}" \
-            --body "Promotion to preprod"
+          BRANCH="${{ github.event.inputs.source_branch }}"
+
+          PR_URL=$(gh pr create \
+            --base $TARGET_BRANCH \
+            --head "$BRANCH" \
+            --title "Promoted: $BRANCH to preprod" \
+            --body "Promotion to preprod environment")
+
+          echo "PR created: $PR_URL"
+
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
   wait-for-merge:
     needs: create-pr
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Wait until PR merged
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          while true; do
-            STATE=$(gh pr list \
-              --head "${{ github.event.inputs.source_branch }}" \
-              --base preprod \
-              --json state \
-              -q '.[0].state')
+    - name: Wait until PR is merged
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        PR_NUMBER="${{ needs.create-pr.outputs.pr_number }}"
 
-            if [[ "$STATE" == "MERGED" ]]; then
-              echo "PR merged"
-              break
-            fi
+        echo "Waiting for PR #$PR_NUMBER to be merged..."
 
-            if [[ "$STATE" == "CLOSED" ]]; then
-              echo "PR closed without merge"
-              exit 1
-            fi
+        for i in {1..180}; do   # 1 hour timeout (180 * 20s)
+          STATE=$(gh pr view $PR_NUMBER --json state -q '.state')
+          MERGED=$(gh pr view $PR_NUMBER --json merged -q '.merged')
 
-            sleep 15
-          done
+          echo "State: $STATE | Merged: $MERGED"
+
+          if [[ "$MERGED" == "true" ]]; then
+            echo "PR merged successfully."
+            exit 0
+          fi
+
+          if [[ "$STATE" == "CLOSED" && "$MERGED" == "false" ]]; then
+            echo "PR closed without merge."
+            exit 1
+          fi
+
+          sleep 20
+        done
+
+        echo "Timeout waiting for PR merge."
+        exit 1
   promote:
     name: Promote Image to Preprod
     needs: [validate, wait-for-merge]
