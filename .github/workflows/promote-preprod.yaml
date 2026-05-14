@@ -53,6 +53,8 @@ jobs:
   create-pr:
     needs: validate
     runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.create_pr.outputs.pr_number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -89,11 +91,16 @@ jobs:
       run: |
         PR_NUMBER="${{ needs.create-pr.outputs.pr_number }}"
 
-        echo "Waiting for PR #$PR_NUMBER to be merged..."
+        echo "PR number is: $PR_NUMBER"
 
-        for i in {1..180}; do   # 1 hour timeout (180 * 20s)
-          STATE=$(gh pr view $PR_NUMBER --json state -q '.state')
-          MERGED=$(gh pr view $PR_NUMBER --json merged -q '.merged')
+        if [ -z "$PR_NUMBER" ]; then
+          echo "PR number is empty!"
+          exit 1
+        fi
+
+        for i in {1..180}; do
+          STATE=$(gh pr view "$PR_NUMBER" --json state -q '.state')
+          MERGED=$(gh pr view "$PR_NUMBER" --json merged -q '.merged')
 
           echo "State: $STATE | Merged: $MERGED"
 
