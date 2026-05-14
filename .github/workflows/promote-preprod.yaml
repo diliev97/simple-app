@@ -100,16 +100,16 @@ jobs:
 
         for i in {1..180}; do
           STATE=$(gh pr view "$PR_NUMBER" --json state -q '.state')
-          MERGED=$(gh pr view "$PR_NUMBER" --json merged -q '.merged')
+          MERGED_AT=$(gh pr view "$PR_NUMBER" --json mergedAt -q '.mergedAt')
 
-          echo "State: $STATE | Merged: $MERGED"
+          echo "State: $STATE | mergedAt: $MERGED_AT"
 
-          if [[ "$MERGED" == "true" ]]; then
+          if [[ "$STATE" == "MERGED" ]]; then
             echo "PR merged successfully."
             exit 0
           fi
 
-          if [[ "$STATE" == "CLOSED" && "$MERGED" == "false" ]]; then
+          if [[ "$STATE" == "CLOSED" && "$MERGED_AT" == "null" ]]; then
             echo "PR closed without merge."
             exit 1
           fi
