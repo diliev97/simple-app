@@ -19,6 +19,9 @@ env:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      branch_type: ${{ steps.detect.outputs.branch_type }}
+      version: ${{ steps.detect.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
