@@ -129,7 +129,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        if: needs.validate.outputs.branch_type == 'hotfix'
+        if: startsWith(github.event.inputs.source_branch, 'hotfix/')
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
@@ -154,15 +154,12 @@ jobs:
           echo "Promotion complete (retag only)."
 
       - name: Build and push hotfix image
-        if: needs.validate.outputs.branch_type == 'hotfix'   
+        if: startsWith(github.event.inputs.source_branch, 'hotfix/')   
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
-          BRANCH="${{ github.event.inputs.source_branch }}"
+          VERSION="${{ github.event.inputs.source_branch }}"
+          VERSION="${VERSION#hotfix/}"
 
           echo "Building new preprod image for hotfix $VERSION"
-
-          git fetch origin "$BRANCH"
-          git checkout "$BRANCH"
 
           docker build \
             -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-preprod \
