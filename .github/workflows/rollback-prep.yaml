@@ -1,88 +1,141 @@
-name: Rollback Preparation
+name: Rollback Preprod
 
 on:
   workflow_dispatch:
     inputs:
-      target_date:
-        description: 'Target release date (e.g., 2026-05-21)'
+      release_version:
+        description: "Release to rollback to (YYYY-MM-DD)"
         required: true
-        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: diliev97/simple-app
+  TARGET_BRANCH: preprod
 
 jobs:
+
   create-rollback-pr:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
+
+    outputs:
+      pr_number: ${{ steps.create_pr.outputs.pr_number }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: preprod
-          fetch-branch: true
 
-      - name: Configure git
+      - name: Create rollback branch
         run: |
-          git config user.name "GitHub Action"
-          git config user.email "action@github.com"
+          VERSION="${{ github.event.inputs.release_version }}"
 
-      - name: Find and prepare rollback
+          git fetch origin $TARGET_BRANCH
+          git checkout -b rollback-to-$VERSION origin/$TARGET_BRANCH
+
+          echo "Creating rollback branch rollback-to-$VERSION"
+
+      - name: Find merge commit to revert
         id: revert
         run: |
-          TARGET_DATE=${{ github.event.inputs.target_date }}
-          echo "Looking for target date: $TARGET_DATE"
+          VERSION="${{ github.event.inputs.release_version }}"
 
-          # Find the merge commit
-          FOUND_COMMIT=""
-          for commit in $(git log --oneline -30 --format="%H %s"); do
-            COMMIT_HASH=$(echo "$commit" | cut -d' ' -f1)
-            COMMIT_MSG=$(echo "$commit" | cut -d' ' -f2-)
-            if echo "$COMMIT_MSG" | grep -qi "Merge" && echo "$COMMIT_MSG" | grep -qiE "(release|hotfix)/$TARGET_DATE"; then
-              FOUND_COMMIT=$COMMIT_HASH
-              echo "Found merge commit: $FOUND_COMMIT"
-              break
-            fi
-          done
+          MERGE_COMMIT=$(git log origin/$TARGET_BRANCH \
+            --merges \
+            --grep="$VERSION" \
+            -1 \
+            --pretty=format:"%H")
 
-          if [ -z "$FOUND_COMMIT" ]; then
-            echo "Could not find merge commit for release/hotfix $TARGET_DATE"
-            echo "Available merge commits:"
-            git log --oneline -20 --merges
+          if [ -z "$MERGE_COMMIT" ]; then
+            echo "No merge commit found for $VERSION"
             exit 1
           fi
 
-          # Get the first parent (preprod before the merge)
-          FIRST_PARENT=$(git rev-list --parents -n 1 $FOUND_COMMIT | cut -d' ' -f2)
-          echo "First parent commit: $FIRST_PARENT"
+          echo "Found merge commit: $MERGE_COMMIT"
 
-          # Reset to first parent (state before merge)
-          git reset --soft $FIRST_PARENT
+          git revert -m 1 $MERGE_COMMIT --no-edit
 
-          # Create a new branch for the rollback
-          BRANCH_NAME="rollback-to/$TARGET_DATE"
-          git checkout -b $BRANCH_NAME
+          git push origin rollback-to-$VERSION
 
-          # Commit the rollback
-          git commit -m "Rollback: Revert to state before $TARGET_DATE merge"
+      - name: Create PR to preprod
+        id: create_pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.release_version }}"
 
-          # Push the branch
-          git push origin $BRANCH_NAME --force
+          PR_NUMBER=$(gh pr create \
+            --base preprod \
+            --head rollback-to-$VERSION \
+            --title "Rollback preprod to $VERSION" \
+            --body "Automated rollback" \
+            --json number \
+            --jq '.number')
 
-          echo "date=$TARGET_DATE" >> $GITHUB_OUTPUT
-          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
-      - name: Create PR
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: pr } = await github.rest.pulls.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Rollback preprod to ${{ steps.revert.outputs.date }}`,
-              body: `Rollback preprod to the state before merging release/${{ steps.revert.outputs.date }}. Merge this PR to complete the rollback.`,
-              head: '${{ steps.revert.outputs.branch }}',
-              base: 'preprod'
-            })
-            console.log('Created PR:', pr.html_url)
+          echo "Created PR #$PR_NUMBER"
+
+
+  wait-for-merge:
+    needs: create-rollback-pr
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Wait for PR merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ needs.create-rollback-pr.outputs.pr_number }}"
+
+          echo "Waiting for rollback PR #$PR_NUMBER"
+
+          for i in {1..180}; do
+            STATE=$(gh pr view "$PR_NUMBER" --json state -q '.state')
+            MERGED_AT=$(gh pr view "$PR_NUMBER" --json mergedAt -q '.mergedAt')
+
+            echo "State: $STATE | mergedAt: $MERGED_AT"
+
+            if [[ "$STATE" == "MERGED" ]]; then
+              echo "Rollback PR merged"
+              exit 0
+            fi
+
+            if [[ "$STATE" == "CLOSED" && "$MERGED_AT" == "null" ]]; then
+              echo "Rollback aborted"
+              exit 1
+            fi
+
+            sleep 20
+          done
+
+          echo "Timeout waiting for rollback PR"
+          exit 1
+
+
+  republish-image:
+    needs: wait-for-merge
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Login to registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY \
+            -u ${{ github.actor }} \
+            --password-stdin
+
+      - name: Re-push existing preprod image (no retag)
+        run: |
+          VERSION="${{ github.event.inputs.release_version }}"
+          TAG="$VERSION-preprod"
+
+          echo "Rolling back using image: $TAG"
+
+          docker pull $REGISTRY/$IMAGE_NAME:$TAG
+          docker push $REGISTRY/$IMAGE_NAME:$TAG
+
+          echo "Rollback completed"
