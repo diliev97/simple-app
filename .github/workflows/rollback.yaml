@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target_date:
-        description: 'Target release date (e.g., 14.05.2026)'
+        description: 'Target release date (e.g., 2026-05-21)'
         required: true
         type: string
 
@@ -36,9 +36,7 @@ jobs:
         id: revert
         run: |
           TARGET_DATE=${{ github.event.inputs.target_date }}
-          # Escape dots for regex
-          ESCAPED_DATE=$(echo "$TARGET_DATE" | sed 's/\./\\./g')
-          echo "Looking for target date: $TARGET_DATE (escaped: $ESCAPED_DATE)"
+          echo "Looking for target date: $TARGET_DATE"
 
           # Find merge commits by checking each commit for multiple parents
           FOUND_COMMIT=""
@@ -46,8 +44,8 @@ jobs:
             PARENT_COUNT=$(git rev-list --parents -n 1 $commit | wc -l)
             if [ "$PARENT_COUNT" -ge 2 ]; then
               MSG=$(git log -1 --format=%B $commit)
-              # Match both "release/21.05.2026" and "from user/release/21.05.2026"
-              if echo "$MSG" | grep -qE "(release|hotfix)/$ESCAPED_DATE|from.*(release|hotfix)/$ESCAPED_DATE"; then
+              # Match both "release/2026-05-21" and "from user/release/2026-05-21"
+              if echo "$MSG" | grep -qE "(release|hotfix)/$TARGET_DATE|from.*(release|hotfix)/$TARGET_DATE"; then
                 FOUND_COMMIT=$commit
                 echo "Found merge commit: $FOUND_COMMIT"
                 break
@@ -88,7 +86,7 @@ jobs:
       - name: Pull and retag image for rollback
         run: |
           TARGET_DATE=${{ github.event.inputs.target_date }}
-          NEW_TIMESTAMP=$(date +%d.%m.%Y)
+          NEW_TIMESTAMP=$(date +%Y-%m-%d)
 
           # Pull the existing preprod image for the target date
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$TARGET_DATE-preprod

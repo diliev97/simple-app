@@ -40,10 +40,10 @@ jobs:
             echo "Commit message (not merge): $MSG"
           fi
 
-          # Try multiple patterns for release branch
-          # Pattern 1: "Merge branch 'release/14.05.2026' into preprod"
-          if echo "$MSG" | grep -qiE "release/[0-9]{2}\.[0-9]{2}\.[0-9]{4}"; then
-            BRANCH=$(echo "$MSG" | grep -oEi "release/[0-9]{2}\.[0-9]{2}\.[0-9]{4}" | head -1 | cut -d'/' -f2)
+          # Try multiple patterns for release branch (YYYY-MM-DD format)
+          # Pattern 1: "Merge branch 'release/2026-05-21' into preprod"
+          if echo "$MSG" | grep -qiE "release/[0-9]{4}-[0-9]{2}-[0-9]{2}"; then
+            BRANCH=$(echo "$MSG" | grep -oEi "release/[0-9]{4}-[0-9]{2}-[0-9]{2}" | head -1 | cut -d'/' -f2)
             if [ -n "$BRANCH" ]; then
               echo "date=$BRANCH" >> $GITHUB_OUTPUT
               echo "type=release" >> $GITHUB_OUTPUT
@@ -52,9 +52,9 @@ jobs:
             fi
           fi
 
-          # Pattern 2: "Merge pull request #XX from release/14.05.2026"
-          if echo "$MSG" | grep -qiE "from release/[0-9]"; then
-            BRANCH=$(echo "$MSG" | grep -oEi "release/[0-9]{2}\.[0-9]{2}\.[0-9]{4}" | head -1 | cut -d'/' -f2)
+          # Pattern 2: "Merge pull request #XX from user/release/2026-05-21"
+          if echo "$MSG" | grep -qiE "from .*/release/[0-9]"; then
+            BRANCH=$(echo "$MSG" | grep -oEi "release/[0-9]{4}-[0-9]{2}-[0-9]{2}" | head -1 | cut -d'/' -f2)
             if [ -n "$BRANCH" ]; then
               echo "date=$BRANCH" >> $GITHUB_OUTPUT
               echo "type=release" >> $GITHUB_OUTPUT
@@ -64,8 +64,8 @@ jobs:
           fi
 
           # Try patterns for hotfix branch
-          if echo "$MSG" | grep -qiE "hotfix/[0-9]{2}\.[0-9]{2}\.[0-9]{4}"; then
-            BRANCH=$(echo "$MSG" | grep -oEi "hotfix/[0-9]{2}\.[0-9]{2}\.[0-9]{4}" | head -1 | cut -d'/' -f2)
+          if echo "$MSG" | grep -qiE "hotfix/[0-9]{4}-[0-9]{2}-[0-9]{2}"; then
+            BRANCH=$(echo "$MSG" | grep -oEi "hotfix/[0-9]{4}-[0-9]{2}-[0-9]{2}" | head -1 | cut -d'/' -f2)
             if [ -n "$BRANCH" ]; then
               echo "date=$BRANCH" >> $GITHUB_OUTPUT
               echo "type=hotfix" >> $GITHUB_OUTPUT
@@ -80,8 +80,8 @@ jobs:
             COMMIT_MSG=$(git log --oneline -$i --format=%s HEAD | head -1)
             echo "Commit $i: $COMMIT_MSG"
 
-            if echo "$COMMIT_MSG" | grep -qiE "release/[0-9]{2}\.[0-9]{2}\.[0-9]{4}"; then
-              BRANCH=$(echo "$COMMIT_MSG" | grep -oEi "release/[0-9]{2}\.[0-9]{2}\.[0-9]{4}" | head -1 | cut -d'/' -f2)
+            if echo "$COMMIT_MSG" | grep -qiE "release/[0-9]{4}-[0-9]{2}-[0-9]{2}"; then
+              BRANCH=$(echo "$COMMIT_MSG" | grep -oEi "release/[0-9]{4}-[0-9]{2}-[0-9]{2}" | head -1 | cut -d'/' -f2)
               if [ -n "$BRANCH" ]; then
                 echo "date=$BRANCH" >> $GITHUB_OUTPUT
                 echo "type=release" >> $GITHUB_OUTPUT
@@ -90,8 +90,8 @@ jobs:
               fi
             fi
 
-            if echo "$COMMIT_MSG" | grep -qiE "hotfix/[0-9]{2}\.[0-9]{2}\.[0-9]{4}"; then
-              BRANCH=$(echo "$COMMIT_MSG" | grep -oEi "hotfix/[0-9]{2}\.[0-9]{2}\.[0-9]{4}" | head -1 | cut -d'/' -f2)
+            if echo "$COMMIT_MSG" | grep -qiE "hotfix/[0-9]{4}-[0-9]{2}-[0-9]{2}"; then
+              BRANCH=$(echo "$COMMIT_MSG" | grep -oEi "hotfix/[0-9]{4}-[0-9]{2}-[0-9]{2}" | head -1 | cut -d'/' -f2)
               if [ -n "$BRANCH" ]; then
                 echo "date=$BRANCH" >> $GITHUB_OUTPUT
                 echo "type=hotfix" >> $GITHUB_OUTPUT
