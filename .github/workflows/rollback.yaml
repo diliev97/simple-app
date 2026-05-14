@@ -64,14 +64,13 @@ jobs:
           echo "Commit message: $MSG"
           echo "commit=$FOUND_COMMIT" >> $GITHUB_OUTPUT
 
-          # Revert the merge commit (creates a new commit that undoes the merge)
-          # Use -X ours to prefer our changes if there are conflicts
-          git revert -m 1 -X ours $FOUND_COMMIT --no-commit || {
-            # If revert fails due to conflicts, just stage all changes and commit
-            echo "Handling merge conflicts..."
-            git add -A
-          }
-          git commit -m "Revert: Rollback to release $TARGET_DATE"
+          # Get the first parent (preprod before the merge)
+          FIRST_PARENT=$(git rev-list --parents -n 1 $FOUND_COMMIT | cut -d' ' -f2)
+          echo "First parent commit: $FIRST_PARENT"
+
+          # Reset to first parent (state before merge), then commit
+          git reset --soft $FIRST_PARENT
+          git commit -m "Rollback: Revert to state before $TARGET_DATE merge"
 
       - name: Push reverted changes
         run: |
