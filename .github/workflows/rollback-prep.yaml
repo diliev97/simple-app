@@ -57,7 +57,7 @@ jobs:
 
           echo "Found merge commit: $MERGE_COMMIT"
 
-          git revert -m 1 $MERGE_COMMIT --no-edit --strategy=recursive -X ours
+          git reset --hard $MERGE_COMMIT 
 
           git push origin rollback-to-$VERSION
 
