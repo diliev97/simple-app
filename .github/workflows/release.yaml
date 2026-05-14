@@ -1,11 +1,9 @@
-name: Build and Push (prod)
+name: Build and Push (release)
 
 on:
   push:
     branches:
       - 'release/*'
-    tags:
-      - 'v*'
 
 env:
   REGISTRY: ghcr.io
@@ -24,6 +22,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Extract date from branch name
+        id: extract-date
+        run: |
+          # Extract date from branch name (e.g., release/14.05.2026 -> 14.05.2026)
+          BRANCH_NAME=${{ github.ref_name }}
+          DATE=${BRANCH_NAME##release/}
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          echo "Extracted date: $DATE"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -34,33 +41,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix=
-            type=raw,value=prod
-            type=raw,value={{sha}}-prod
-            type=semver,pattern={{version}},from={{major}}.{{minor}}.{{patch}}
-            type=semver,pattern={{major}}.{{minor}},from={{major}}.{{minor}}
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.extract-date.outputs.date }}-release
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.extract-date.outputs.date }}
           build-args: |
             GIT_VERSION=${{ github.ref_name }}
             GIT_COMMIT=${{ github.sha }}
           no-cache: true
-
-      - name: Get image digest
-        id: digest
-        run: |
-          echo "digest=${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
