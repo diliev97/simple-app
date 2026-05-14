@@ -43,7 +43,8 @@ jobs:
             PARENT_COUNT=$(git rev-list --parents -n 1 $commit | wc -l)
             if [ "$PARENT_COUNT" -ge 2 ]; then
               MSG=$(git log -1 --format=%B $commit)
-              if echo "$MSG" | grep -qE "(release|hotfix)/$TARGET_DATE"; then
+              # Match both "release/21.05.2026" and "from user/release/21.05.2026"
+              if echo "$MSG" | grep -qE "(release|hotfix)/$TARGET_DATE|from.*(release|hotfix)/$TARGET_DATE"; then
                 FOUND_COMMIT=$commit
                 break
               fi
