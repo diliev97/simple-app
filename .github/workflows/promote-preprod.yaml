@@ -20,21 +20,31 @@ jobs:
           fetch-depth: 0
 
       - name: Prevent older release promotion
+        if: steps.detect.outputs.branch_type == 'release'
         run: |
-          git fetch origin preprod
+          git fetch origin $TARGET_BRANCH
 
-          LAST=$(git log origin/preprod --grep="Promoted:" -1 --pretty=format:"%s")
-          echo "Last promotion: $LAST"
+          LAST_PROMOTION=$(git log origin/$TARGET_BRANCH \
+            --grep="Promoted:" \
+            -1 \
+            --pretty=format:"%s" || true)
 
-          if [[ "${{ github.event.inputs.source_branch }}" == release/* ]]; then
-            NEW_DATE=$(echo "${{ github.event.inputs.source_branch }}" | cut -d'/' -f2)
-            LAST_DATE=$(echo "$LAST" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}')
-
-            if [[ "$LAST_DATE" > "$NEW_DATE" ]]; then
-              echo "ERROR: Newer release already promoted"
-              exit 1
-            fi
+          if [ -z "$LAST_PROMOTION" ]; then
+            echo "No previous promotion found. Allowing first promotion."
+            exit 0
           fi
+
+          echo "Last promotion: $LAST_PROMOTION"
+
+          LAST_DATE=$(echo "$LAST_PROMOTION" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+          NEW_DATE="${{ steps.detect.outputs.version }}"
+
+          if [ -n "$LAST_DATE" ] && [[ "$LAST_DATE" > "$NEW_DATE" ]]; then
+            echo "ERROR: A newer release ($LAST_DATE) is already promoted."
+            exit 1
+          fi
+
+          echo "Promotion order validation passed."
   create-pr:
     needs: validate
     runs-on: ubuntu-latest
