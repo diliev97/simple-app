@@ -38,30 +38,27 @@ jobs:
           TARGET_DATE=${{ github.event.inputs.target_date }}
           echo "Looking for target date: $TARGET_DATE"
 
-          # Find the merge commit by searching for the pattern in commit messages
-          FOUND_COMMIT=$(git log --oneline --all --format=%H --grep="$TARGET_DATE" | head -1)
-
-          if [ -z "$FOUND_COMMIT" ]; then
-            # Try a different approach - look for commits with the date in message body
-            FOUND_COMMIT=$(git log --oneline -30 --format=%H | while read commit; do
-              MSG=$(git log -1 --format=%B "$commit")
-              if echo "$MSG" | grep -qiE "release/$TARGET_DATE|hotfix/$TARGET_DATE"; then
-                echo "$commit"
-                break
-              fi
-            done)
-          fi
+          # Search for merge commits containing the target date
+          FOUND_COMMIT=""
+          for commit in $(git log --oneline -30 --format="%H %s"); do
+            COMMIT_HASH=$(echo "$commit" | cut -d' ' -f1)
+            COMMIT_MSG=$(echo "$commit" | cut -d' ' -f2-)
+            # Check if it's a merge commit (has "Merge" in subject) and contains target date
+            if echo "$COMMIT_MSG" | grep -qi "Merge" && echo "$COMMIT_MSG" | grep -qiE "(release|hotfix)/$TARGET_DATE"; then
+              FOUND_COMMIT=$COMMIT_HASH
+              echo "Found merge commit: $FOUND_COMMIT"
+              echo "Message: $COMMIT_MSG"
+              break
+            fi
+          done
 
           if [ -z "$FOUND_COMMIT" ]; then
             echo "Could not find merge commit for release/hotfix $TARGET_DATE"
-            echo "All merge commits in last 20:"
-            git log --oneline -20 --merges
+            echo "All commits:"
+            git log --oneline -20
             exit 1
           fi
 
-          echo "Found merge commit: $FOUND_COMMIT"
-          MSG=$(git log -1 --format=%B $FOUND_COMMIT)
-          echo "Commit message: $MSG"
           echo "commit=$FOUND_COMMIT" >> $GITHUB_OUTPUT
 
           # Revert the merge commit (creates a new commit that undoes the merge)
