@@ -37,27 +37,29 @@ jobs:
         run: |
           TARGET_DATE=${{ github.event.inputs.target_date }}
 
-          # Find the merge commit that merged the target release/hotfix
-          # Look for commits like "Merge branch 'release/14.05.2026' into preprod"
-          MERGE_COMMITS=$(git log --oneline --merges -20 origin/preprod)
-
+          # Find merge commits by checking each commit for multiple parents
           FOUND_COMMIT=""
-          for commit in $MERGE_COMMITS; do
-            MSG=$(git log -1 --format=%B $commit)
-            if echo "$MSG" | grep -qE "Merge (branch|commit).*(release|hotfix)/$TARGET_DATE"; then
-              FOUND_COMMIT=$commit
-              break
+          for commit in $(git log --oneline -20 --format=%H); do
+            PARENT_COUNT=$(git rev-list --parents -n 1 $commit | wc -l)
+            if [ "$PARENT_COUNT" -ge 2 ]; then
+              MSG=$(git log -1 --format=%B $commit)
+              if echo "$MSG" | grep -qE "(release|hotfix)/$TARGET_DATE"; then
+                FOUND_COMMIT=$commit
+                break
+              fi
             fi
           done
 
           if [ -z "$FOUND_COMMIT" ]; then
             echo "Could not find merge commit for release/hotfix $TARGET_DATE"
-            echo "Available merge commits:"
-            echo "$MERGE_COMMITS"
+            echo "Checking last 20 commits..."
+            git log --oneline -20
             exit 1
           fi
 
           echo "Found merge commit: $FOUND_COMMIT"
+          MSG=$(git log -1 --format=%B $FOUND_COMMIT)
+          echo "Commit message: $MSG"
           echo "commit=$FOUND_COMMIT" >> $GITHUB_OUTPUT
 
           # Revert the merge commit (creates a new commit that undoes the merge)

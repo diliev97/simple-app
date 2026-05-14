@@ -25,30 +25,59 @@ jobs:
       - name: Detect merged branch type and date
         id: detect
         run: |
-          # Get the merge commit and find which release/hotfix branch was merged
-          COMMITS=$(git log --oneline --merges -10 origin/preprod)
+          # First, check if the latest commit is a merge commit
+          IS_MERGE=$(git rev-list --parents -n 1 HEAD | wc -l)
+          echo "Number of parents: $IS_MERGE"
 
-          for commit in $COMMITS; do
-            MSG=$(git log -1 --format=%B $commit)
-            if echo "$MSG" | grep -q "Merge branch 'release/"; then
-              BRANCH=$(echo "$MSG" | grep -oP "release/\K[0-9.]+" | head -1)
+          if [ "$IS_MERGE" -ge 2 ]; then
+            # This is a merge commit, check the commit message
+            MSG=$(git log -1 --format=%B HEAD)
+            echo "Commit message: $MSG"
+          else
+            # Not a merge commit, check recent commits
+            MSG=$(git log --oneline -5 | head -1)
+            echo "Latest commit: $MSG"
+          fi
+
+          # Look for release branch
+          if echo "$MSG" | grep -qE "Merge.*release/[0-9]"; then
+            BRANCH=$(echo "$MSG" | grep -oE "release/[0-9.]+" | head -1 | cut -d'/' -f2)
+            if [ -n "$BRANCH" ]; then
+              echo "date=$BRANCH" >> $GITHUB_OUTPUT
+              echo "type=release" >> $GITHUB_OUTPUT
+              echo "Detected: release branch with date $BRANCH"
+              exit 0
+            fi
+          fi
+
+          # Look for hotfix branch
+          if echo "$MSG" | grep -qE "Merge.*hotfix/[0-9]"; then
+            BRANCH=$(echo "$MSG" | grep -oE "hotfix/[0-9.]+" | head -1 | cut -d'/' -f2)
+            if [ -n "$BRANCH" ]; then
+              echo "date=$BRANCH" >> $GITHUB_OUTPUT
+              echo "type=hotfix" >> $GITHUB_OUTPUT
+              echo "Detected: hotfix branch with date $BRANCH"
+              exit 0
+            fi
+          fi
+
+          # Fallback: check parent commits for release/hotfix references
+          echo "Checking parent commits..."
+          PARENT1=$(git rev-list --parents -n 1 HEAD | awk '{print $2}')
+          if [ -n "$PARENT1" ]; then
+            PARENT_MSG=$(git log -1 --format=%B $PARENT1)
+            echo "Parent commit message: $PARENT_MSG"
+
+            if echo "$PARENT_MSG" | grep -qE "release/[0-9]"; then
+              BRANCH=$(echo "$PARENT_MSG" | grep -oE "release/[0-9.]+" | head -1 | cut -d'/' -f2)
               if [ -n "$BRANCH" ]; then
                 echo "date=$BRANCH" >> $GITHUB_OUTPUT
                 echo "type=release" >> $GITHUB_OUTPUT
-                echo "Detected: release branch with date $BRANCH"
+                echo "Detected from parent: release branch with date $BRANCH"
                 exit 0
               fi
             fi
-            if echo "$MSG" | grep -q "Merge branch 'hotfix/"; then
-              BRANCH=$(echo "$MSG" | grep -oP "hotfix/\K[0-9.]+" | head -1)
-              if [ -n "$BRANCH" ]; then
-                echo "date=$BRANCH" >> $GITHUB_OUTPUT
-                echo "type=hotfix" >> $GITHUB_OUTPUT
-                echo "Detected: hotfix branch with date $BRANCH"
-                exit 0
-              fi
-            fi
-          done
+          fi
 
           echo "Could not find merged release/hotfix branch"
           exit 1
