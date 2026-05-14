@@ -55,22 +55,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create PR
+      - name: Create PR to preprod
         id: create_pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="${{ github.event.inputs.source_branch }}"
+          BASE="${{ env.TARGET_BRANCH }}"
+
+          echo "Creating PR from '$BRANCH' to '$BASE'"
 
           PR_URL=$(gh pr create \
-            --base $TARGET_BRANCH \
+            --base "$BASE" \
             --head "$BRANCH" \
             --title "Promoted: $BRANCH to preprod" \
-            --body "Promotion to preprod environment")
+            --body "Promotion to preprod environment" \
+            --repo "${{ github.repository }}")
 
           echo "PR created: $PR_URL"
 
-          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          PR_NUMBER=$(echo "$PR_URL" | awk -F'/' '{print $NF}')
 
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
   wait-for-merge:
