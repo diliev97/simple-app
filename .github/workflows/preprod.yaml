@@ -1,9 +1,9 @@
 name: Promote to Preprod
 
-on:
-  push:
-    branches:
-      - preprod
+#on:
+#  push:
+#   branches:
+#      - preprod
 
 env:
   REGISTRY: ghcr.io
