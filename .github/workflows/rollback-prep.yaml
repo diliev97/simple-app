@@ -35,9 +35,9 @@ jobs:
           VERSION="${{ github.event.inputs.release_version }}"
 
           git fetch origin $TARGET_BRANCH
-          git checkout -b rollback-to-$VERSION origin/$TARGET_BRANCH
+        #  git checkout -b rollback-to-$VERSION origin/$TARGET_BRANCH
 
-          echo "Creating rollback branch rollback-to-$VERSION"
+        #  echo "Creating rollback branch rollback-to-$VERSION"
 
       - name: Find merge commit to revert
         id: revert
@@ -59,63 +59,7 @@ jobs:
 
           git reset --hard $MERGE_COMMIT 
 
-          git push origin rollback-to-$VERSION
-
-      - name: Create PR to preprod
-        id: create_pr
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ github.event.inputs.release_version }}"
-
-          PR_NUMBER=$(gh pr create \
-            --base preprod \
-            --head rollback-to-$VERSION \
-            --title "Rollback preprod to $VERSION" \
-            --body "Automated rollback" \
-            --json number \
-            --jq '.number')
-
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-
-          echo "Created PR #$PR_NUMBER"
-
-
-  wait-for-merge:
-    needs: create-rollback-pr
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Wait for PR merge
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER="${{ needs.create-rollback-pr.outputs.pr_number }}"
-
-          echo "Waiting for rollback PR #$PR_NUMBER"
-
-          for i in {1..180}; do
-            STATE=$(gh pr view "$PR_NUMBER" --json state -q '.state')
-            MERGED_AT=$(gh pr view "$PR_NUMBER" --json mergedAt -q '.mergedAt')
-
-            echo "State: $STATE | mergedAt: $MERGED_AT"
-
-            if [[ "$STATE" == "MERGED" ]]; then
-              echo "Rollback PR merged"
-              exit 0
-            fi
-
-            if [[ "$STATE" == "CLOSED" && "$MERGED_AT" == "null" ]]; then
-              echo "Rollback aborted"
-              exit 1
-            fi
-
-            sleep 20
-          done
-
-          echo "Timeout waiting for rollback PR"
-          exit 1
-
+          git push origin preprod
 
   republish-image:
     needs: wait-for-merge
